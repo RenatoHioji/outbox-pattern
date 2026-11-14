@@ -1,23 +1,10 @@
----
-title: PostgreSQL WAL Levels (minimal vs replica vs logical)
-aliases:
-  - WAL Levels
-  - PostgreSQL Write-Ahead Log
-tags:
-  - outbox-pattern
-  - postgresql
-  - wal
-  - cdc
-  - kafka
-created: 2026-11-14
----
+# Outbox Pattern Study
 
-# PostgreSQL Write-Ahead Log (`wal_level`)
+## PostgreSQL Write-Ahead Log (`wal_level`): `minimal` vs. `replica` vs. `logical`
 
-> [!abstract] Core Concept
-> Before [[PostgreSQL]] modifies any table on disk, it first appends every change (`INSERT`, `UPDATE`, `DELETE`) to an internal transaction log called the **[[Write-Ahead Log (WAL)]]**. This guarantees durability (`ACID`) if the server loses power mid-transaction.
+Before PostgreSQL modifies any table on disk, it first appends every change (`INSERT`, `UPDATE`, `DELETE`) to an internal transaction log called the **Write-Ahead Log (WAL)**. This guarantees durability if the server loses power mid-transaction.
 
-In [[docker-compose.yml]], PostgreSQL is configured with:
+In [docker-compose.yml](./docker-compose.yml), PostgreSQL is started with:
 
 ```yaml
 command:
@@ -26,94 +13,44 @@ command:
   - "wal_level=logical"
 ```
 
-The `wal_level` setting controls **how much context** PostgreSQL writes to the WAL stream.
+The `wal_level` setting controls **how much context** PostgreSQL writes to the WAL stream:
 
----
-
-## Visual Flow of `wal_level` Modes
-
-```mermaid
-flowchart LR
-    SQL["INSERT INTO outbox_messages"] --> WAL["PostgreSQL WAL Stream"]
-    WAL --> MIN["minimal\n(Crash Recovery Only)"]
-    WAL --> REP["replica\n(Physical Disk Blocks)"]
-    WAL --> LOG["logical\n(Row & Column Events)"]
-
-    REP --> STANDBY["Read-Replica / PITR"]
-    LOG --> CDC["CDC / Debezium -> Kafka"]
-```
-
----
-
-## 1. `minimal` — Crash Recovery Only
-
-> [!info] When to use
-> Local or scratch databases where you only care about surviving a process crash and never need replication or point-in-time backups.
-
-- **What it writes:** Only the bare minimum information needed to recover database consistency if the server crashes mid-transaction. For bulk operations (`CREATE TABLE AS`, `CLUSTER`, `COPY` into a new table), it skips writing WAL altogether and flushes data files to disk at commit time.
+### 1. `minimal` (Crash Recovery Only)
+- **What it writes:** Only the bare minimum information needed to recover database consistency if the server crashes mid-transaction. For bulk operations (such as `CREATE TABLE AS`, `CLUSTER`, or `COPY` into a newly created table), it can skip writing WAL altogether and simply flush the data files to disk at commit time.
+- **What gets recorded on `INSERT`:**
+  ```text
+  [Physical] Heap Page 42, Offset 3: write 128 bytes (crash recovery records only)
+  ```
 - **Write Overhead:** Baseline (lowest disk I/O).
+- **Limitation:** You **cannot** use read-replicas (standby servers), WAL archiving, or Point-in-Time Recovery (PITR) backups.
 
-> [!example] What gets recorded on `INSERT`
-> ```text
-> [Physical] Heap Page 42, Offset 3: write 128 bytes (crash recovery records only)
-> ```
-
-> [!warning] Limitation
-> You **cannot** use [[Physical Read-Replicas]], WAL archiving, or [[Point-in-Time Recovery (PITR)]] backups.
-
----
-
-## 2. `replica` — PostgreSQL Default
-
-> [!info] When to use
-> Standard production databases using physical standby replicas and continuous backups.
-
+### 2. `replica` (PostgreSQL Default)
 - **What it writes:** Every **physical disk block change** (for example: *"In relation file `16389`, block `42`, byte offset `3`, write these raw tuple bytes"*).
-- **What uses it:** [[Physical Read-Replicas]] and [[Point-in-Time Recovery (PITR)]]. Because a physical replica is an exact binary clone of the primary database, it simply copies those raw disk block changes to its own disk files.
-- **Write Overhead:** Standard default.
+- **What gets recorded on `INSERT`:**
+  ```text
+  [Physical] RelNode 16389, Block 42, Offset 3: raw tuple bytes 0x8f14...
+  (knows physical disk addresses, NOT logical table/column names)
+  ```
+- **What uses it:** Read-replicas (physical standby servers) and Point-in-Time Recovery (PITR). Because a physical replica is an exact binary clone of the primary database, it simply copies those raw disk block changes to its own disk files.
+- **Limitation:** External tools (such as Debezium / Kafka Connect) cannot decode raw physical disk block addresses into a meaningful JSON event without full access to PostgreSQL's internal catalog state.
 
-> [!example] What gets recorded on `INSERT`
-> ```text
-> [Physical] RelNode 16389, Block 42, Offset 3: raw tuple bytes 0x8f14...
-> (knows physical disk addresses, NOT logical table/column names)
-> ```
+### 3. `logical` (Required for Change Data Capture / CDC)
+- **What it writes:** Everything included in `replica`, **plus extra catalog/tuple metadata** so PostgreSQL's built-in logical decoding plugin (`pgoutput`) can translate physical disk changes back into **row-level logical events** (such as *"In table `public.outbox_messages`, a row was `INSERT`ed with `id = '8f14...'`, `event_type = 'OrderCreated'`, and `payload = '{\"total\":99}'`"*).
+- **What gets recorded on `INSERT`:**
+  ```text
+  [Physical] Heap Page 42, Offset 3: write 128 bytes
+  [Logical]  TABLE public.outbox_messages: INSERT:
+               id[uuid]:'8f14..'
+               event_type[varchar]:'OrderCreated'
+               payload[jsonb]:'{"total":99}'
+  ```
+- **What uses it:** Logical replication and Change Data Capture (CDC) tools like **Debezium**, which tail the WAL via a replication slot and stream row changes directly to **Apache Kafka**.
+- **Trade-off:** Adds roughly **5–10% extra WAL disk I/O and storage overhead** on write-heavy workloads, in exchange for enabling real-time event streaming out of the database without polling `SELECT` queries.
 
-> [!warning] Limitation
-> External tools like [[Debezium]] or [[Kafka Connect]] **cannot** decode raw physical disk addresses into meaningful JSON events without full access to PostgreSQL's internal catalog state.
+### Summary Comparison
 
----
-
-## 3. `logical` — Required for Change Data Capture (CDC)
-
-> [!tip] Why we use this in [[Transactional Outbox Pattern]]
-> Enables **[[Log-Based CDC]]** so tools like [[Debezium]] can stream `INSERT`s from `outbox_messages` directly into [[Apache Kafka]] without running polling `SELECT` queries.
-
-- **What it writes:** Everything included in `replica`, **plus extra catalog/tuple metadata** so PostgreSQL's built-in logical decoding plugin (`pgoutput`) can translate physical disk changes back into **row-level logical events**.
-- **What uses it:** Logical replication and [[Change Data Capture (CDC)]] tools like [[Debezium]], which tail the WAL via a [[Replication Slot]] and stream row changes to [[Apache Kafka]].
-- **Write Overhead:** Adds roughly **5–10% extra WAL disk I/O and storage overhead** on write-heavy workloads.
-
-> [!example] What gets recorded on `INSERT`
-> ```text
-> [Physical] Heap Page 42, Offset 3: write 128 bytes
-> [Logical]  TABLE public.outbox_messages: INSERT:
->              id[uuid]:'8f14..'
->              event_type[varchar]:'OrderCreated'
->              payload[jsonb]:'{"total":99}'
-> ```
-
----
-
-## Summary Comparison
-
-| `wal_level` | Crash Recovery | Physical Read-Replicas & PITR | Logical Decoding & [[Change Data Capture (CDC)\|CDC]] | WAL Write Overhead |
+| `wal_level` | Crash Recovery | Physical Read-Replicas & PITR | Logical Decoding & CDC (Debezium) | WAL Write Overhead |
 | :--- | :---: | :---: | :---: | :--- |
-| **`minimal`** | ✅ | ❌ | ❌ | Lowest |
-| **`replica`** *(default)* | ✅ | ✅ | ❌ | Standard |
-| **`logical`** | ✅ | ✅ | ✅ | +5–10% on heavy writes |
-
----
-
-## Related Notes
-- [[Transactional Outbox Pattern]]
-- [[Polling Publisher vs Log-Based CDC]]
-- [[Idempotent Consumers]]
+| **`minimal`** | Yes | No | No | Lowest |
+| **`replica`** *(default)* | Yes | Yes | No | Standard |
+| **`logical`** | Yes | Yes | **Yes** | +5–10% on heavy writes |
