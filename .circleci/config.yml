@@ -1,0 +1,34 @@
+version: 2.1
+
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/go:1.23
+    steps:
+      - checkout
+
+      - restore_cache:
+          name: Restore Go module and build cache
+          keys:
+            - go-cache-v1-{{ checksum "go.mod" }}
+            - go-cache-v1-
+
+      - run:
+          name: Build project
+          command: go build -v ./...
+
+      - run:
+          name: Run unit tests
+          command: go test -v -race ./...
+
+      - save_cache:
+          name: Save Go module and build cache
+          key: go-cache-v1-{{ checksum "go.mod" }}
+          paths:
+            - /home/circleci/go/pkg/mod
+            - /home/circleci/.cache/go-build
+
+workflows:
+  ci:
+    jobs:
+      - build-and-test
