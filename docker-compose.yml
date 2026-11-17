@@ -52,6 +52,60 @@ services:
       timeout: 5s
       retries: 5
 
+  debezium:
+    image: quay.io/debezium/connect:2.7
+    container_name: outbox-debezium
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/connectors || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  debezium-init:
+    image: curlimages/curl:8.11.0
+    container_name: outbox-debezium-init
+    depends_on:
+      debezium:
+        condition: service_healthy
+    volumes:
+      - ./debezium/outbox-connector.json:/debezium/outbox-connector.json:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Registering Debezium outbox-connector..."
+        status=$$(curl -s -o /tmp/response.txt -w "%{http_code}" -X POST http://debezium:8083/connectors \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          -d @/debezium/outbox-connector.json)
+        cat /tmp/response.txt
+        echo ""
+        if [ "$$status" = "201" ] || [ "$$status" = "200" ] || [ "$$status" = "409" ]; then
+          echo "Connector registered successfully (HTTP $$status)."
+          exit 0
+        fi
+        echo "Failed to register connector (HTTP $$status)."
+        exit 1
+
 volumes:
   postgres_data:
   kafka_data:
