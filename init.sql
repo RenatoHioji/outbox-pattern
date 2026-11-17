@@ -17,8 +17,3 @@ CREATE TABLE IF NOT EXISTS outbox_messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     processed_at TIMESTAMPTZ NULL
 );
-
--- Partial index for fast polling of unprocessed outbox messages
-CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed
-    ON outbox_messages (created_at)
-    WHERE processed_at IS NULL;
