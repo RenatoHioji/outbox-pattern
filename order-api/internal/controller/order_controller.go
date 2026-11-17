@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/RenatoHioji/outbox-pattern/internal/repository"
+	"github.com/RenatoHioji/outbox-pattern/order-api/internal/repository"
 	"github.com/go-playground/validator/v10"
 )
 

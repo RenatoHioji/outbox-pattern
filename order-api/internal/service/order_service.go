@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/RenatoHioji/outbox-pattern/internal/repository"
+	"github.com/RenatoHioji/outbox-pattern/order-api/internal/repository"
 )
 
 type OrderRepository interface {
