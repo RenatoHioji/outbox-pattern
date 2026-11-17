@@ -5,9 +5,17 @@ import (
 	"net/http"
 
 	"github.com/RenatoHioji/outbox-pattern/internal/controller"
+	"github.com/RenatoHioji/outbox-pattern/internal/database"
 )
 
 func main() {
+	db, err := database.NewPostgresConnection(database.DefaultConfig())
+	if err != nil {
+		log.Fatalf("database connection failed: %v", err)
+	}
+	defer db.Close()
+	log.Println("Connected to PostgreSQL successfully")
+
 	mux := http.NewServeMux()
 
 	orderController := controller.NewOrderController()

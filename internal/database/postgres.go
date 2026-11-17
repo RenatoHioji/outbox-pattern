@@ -1,0 +1,55 @@
+package database
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+
+	_ "github.com/lib/pq"
+)
+
+type Config struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Host:     getEnv("POSTGRES_HOST", "localhost"),
+		Port:     getEnv("POSTGRES_PORT", "5432"),
+		User:     getEnv("POSTGRES_USER", "outbox_user"),
+		Password: getEnv("POSTGRES_PASSWORD", "outbox_password"),
+		DBName:   getEnv("POSTGRES_DB", "outbox_db"),
+		SSLMode:  getEnv("POSTGRES_SSLMODE", "disable"),
+	}
+}
+
+func NewPostgresConnection(cfg Config) (*sql.DB, error) {
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode,
+	)
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open postgres connection: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to ping postgres: %w", err)
+	}
+
+	return db, nil
+}
+
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
+}
