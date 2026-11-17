@@ -93,22 +93,20 @@ Defined in [debezium/outbox-connector.json](./debezium/outbox-connector.json):
    curl -s http://localhost:8083/connectors/outbox-connector/status
    ```
 
-3. **Create orders (via `curl` or `k6`) and watch the Kafka topic (`outbox.event.Order`):**
+3. **Start the services (`order-api` and `order-consumer`) and send orders:**
    ```bash
-   # Single order via curl
+   # Terminal 1: Start the Order API (Producer -> writes to Postgres)
+   go run ./order-api
+
+   # Terminal 2: Start the Order Consumer (Consumer -> reads from Kafka topic outbox.event.Order)
+   go run ./order-consumer
+
+   # Terminal 3: Create a single order via curl
    curl -X POST http://localhost:8080/orders \
      -H "Content-Type: application/json" \
      -d '{"customer_id": "cust-123", "total_amount": 99.90}'
 
    # Or load test with k6 (10 VUs for 30s)
    k6 run k6/create_orders.js
-
-   # Consume the events streamed from PostgreSQL WAL into Kafka
-   docker exec -it outbox-kafka /opt/kafka/bin/kafka-console-consumer.sh \
-     --bootstrap-server localhost:9092 \
-     --topic outbox.event.Order \
-     --from-beginning \
-     --property print.key=true \
-     --property print.headers=true
    ```
 
