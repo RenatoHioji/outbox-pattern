@@ -1,5 +1,3 @@
--- Sample schema for the Transactional Outbox Pattern
-
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY,
     customer_id VARCHAR(100) NOT NULL,
