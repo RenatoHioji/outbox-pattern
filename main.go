@@ -6,6 +6,8 @@ import (
 
 	"github.com/RenatoHioji/outbox-pattern/internal/controller"
 	"github.com/RenatoHioji/outbox-pattern/internal/database"
+	"github.com/RenatoHioji/outbox-pattern/internal/repository"
+	"github.com/RenatoHioji/outbox-pattern/internal/service"
 )
 
 func main() {
@@ -16,9 +18,11 @@ func main() {
 	defer db.Close()
 	log.Println("Connected to PostgreSQL successfully")
 
-	mux := http.NewServeMux()
+	orderRepo := repository.NewOrderRepository(db)
+	orderService := service.NewOrderService(orderRepo)
+	orderController := controller.NewOrderController(orderService)
 
-	orderController := controller.NewOrderController()
+	mux := http.NewServeMux()
 	mux.HandleFunc("POST /orders", orderController.CreateOrder)
 
 	addr := ":8080"
