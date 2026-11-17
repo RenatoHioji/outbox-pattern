@@ -19,7 +19,12 @@ jobs:
 
       - run:
           name: Run unit tests
-          command: go test -v -race ./...
+          command: |
+            mkdir -p test-results
+            gotestsum --junitfile test-results/junit.xml -- -race ./...
+
+      - store_test_results:
+          path: test-results
 
       - save_cache:
           name: Save Go module and build cache
