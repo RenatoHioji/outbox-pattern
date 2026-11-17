@@ -10,25 +10,27 @@ jobs:
       - restore_cache:
           name: Restore Go module and build cache
           keys:
-            - go-cache-v1-{{ checksum "go.sum" }}
+            - go-cache-v1-{{ checksum "order-api/go.sum" }}-{{ checksum "order-consumer/go.sum" }}
             - go-cache-v1-
 
       - run:
-          name: Build project
-          command: go build -v ./...
+          name: Build services
+          command: |
+            go build -C order-api -v ./...
+            go build -C order-consumer -v ./...
 
       - run:
           name: Run unit tests
           command: |
             mkdir -p test-results
-            gotestsum --junitfile test-results/junit.xml -- -race ./...
+            gotestsum --junitfile test-results/junit.xml -- -race ./order-api/... ./order-consumer/...
 
       - store_test_results:
           path: test-results
 
       - save_cache:
           name: Save Go module and build cache
-          key: go-cache-v1-{{ checksum "go.sum" }}
+          key: go-cache-v1-{{ checksum "order-api/go.sum" }}-{{ checksum "order-consumer/go.sum" }}
           paths:
             - /home/circleci/go/pkg/mod
             - /home/circleci/.cache/go-build
