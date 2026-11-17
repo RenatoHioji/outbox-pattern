@@ -54,3 +54,61 @@ The `wal_level` setting controls **how much context** PostgreSQL writes to the W
 | **`minimal`** | Yes | No | No | Lowest |
 | **`replica`** *(default)* | Yes | Yes | No | Standard |
 | **`logical`** | Yes | Yes | **Yes** | +5–10% on heavy writes |
+
+---
+
+## Consuming the WAL with Debezium (Outbox Event Router)
+
+With `wal_level=logical` enabled on PostgreSQL, **Debezium (Kafka Connect)** connects to PostgreSQL via the built-in `pgoutput` logical decoding plugin, tails the `public.outbox_messages` table in the WAL, and transforms each inserted row into a clean Kafka event using the **Outbox Event Router SMT** (`io.debezium.transforms.outbox.EventRouter`).
+
+### How the Connector Config Maps `outbox_messages`
+
+Defined in [debezium/outbox-connector.json](./debezium/outbox-connector.json):
+
+| Connector Property | Value | Purpose |
+| :--- | :--- | :--- |
+| `plugin.name` | `pgoutput` | Uses PostgreSQL's native logical decoding plugin to read the WAL |
+| `slot.name` | `outbox_slot` | Name of the PostgreSQL replication slot tracking WAL offsets |
+| `publication.name` | `outbox_pub` | PostgreSQL publication filtered to `public.outbox_messages` |
+| `table.include.list` | `public.outbox_messages` | Only captures WAL changes from the outbox table |
+| `transforms.outbox.type` | `io.debezium.transforms.outbox.EventRouter` | Unwraps the raw CDC envelope into a domain event |
+| `transforms.outbox.table.field.event.id` | `id` | Maps `outbox_messages.id` to the Kafka header `id` |
+| `transforms.outbox.table.field.event.key` | `aggregate_id` | Uses `aggregate_id` (Order ID) as the Kafka message key (preserving partition ordering per order) |
+| `transforms.outbox.table.field.event.type` | `event_type` | Maps `outbox_messages.event_type` (`OrderCreated`) |
+| `transforms.outbox.table.field.event.payload` | `payload` | Extracts `outbox_messages.payload` as the Kafka message body |
+| `transforms.outbox.route.by.field` | `aggregate_type` | Routes messages to topics based on `aggregate_type` (`Order`) |
+| `transforms.outbox.route.topic.replacement` | `outbox.event.${routedByValue}` | Publishes `Order` events to the `outbox.event.Order` Kafka topic |
+| `transforms.outbox.table.expand.json.payload` | `true` | Expands the `JSONB` string into a real JSON object in Kafka |
+
+### Running & Verifying the Connector
+
+1. **Start the infrastructure (`postgres`, `kafka`, `debezium`, and `debezium-init`):**
+   ```bash
+   docker compose up -d
+   ```
+   > `debezium-init` waits for `debezium` to become healthy and automatically registers [debezium/outbox-connector.json](./debezium/outbox-connector.json) via `POST http://debezium:8083/connectors`.
+
+2. **Check connector status:**
+   ```bash
+   curl -s http://localhost:8083/connectors/outbox-connector/status
+   ```
+
+3. **Create orders (via `curl` or `k6`) and watch the Kafka topic (`outbox.event.Order`):**
+   ```bash
+   # Single order via curl
+   curl -X POST http://localhost:8080/orders \
+     -H "Content-Type: application/json" \
+     -d '{"customer_id": "cust-123", "total_amount": 99.90}'
+
+   # Or load test with k6 (10 VUs for 30s)
+   k6 run k6/create_orders.js
+
+   # Consume the events streamed from PostgreSQL WAL into Kafka
+   docker exec -it outbox-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+     --bootstrap-server localhost:9092 \
+     --topic outbox.event.Order \
+     --from-beginning \
+     --property print.key=true \
+     --property print.headers=true
+   ```
+
