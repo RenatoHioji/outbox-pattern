@@ -17,11 +17,15 @@ func main() {
 	topic := getEnv("KAFKA_TOPIC", "outbox.event.Order")
 	groupID := getEnv("KAFKA_GROUP_ID", "order-consumer-group")
 
+	ensureTopicExists(brokers[0], topic)
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       topic,
-		GroupID:     groupID,
-		StartOffset: kafka.FirstOffset,
+		Brokers:               brokers,
+		Topic:                 topic,
+		GroupID:               groupID,
+		StartOffset:           kafka.FirstOffset,
+		WatchPartitionChanges: true,
+		ErrorLogger:           kafka.LoggerFunc(log.Printf),
 	})
 	defer reader.Close()
 
@@ -35,6 +39,24 @@ func main() {
 		log.Fatalf("consumer stopped with error: %v", err)
 	}
 	log.Println("Order Kafka Consumer shut down cleanly")
+}
+
+func ensureTopicExists(broker, topic string) {
+	conn, err := kafka.Dial("tcp", broker)
+	if err != nil {
+		log.Printf("warning: could not dial kafka broker %s to check topic: %v", broker, err)
+		return
+	}
+	defer conn.Close()
+
+	err = conn.CreateTopics(kafka.TopicConfig{
+		Topic:             topic,
+		NumPartitions:     3,
+		ReplicationFactor: 1,
+	})
+	if err != nil {
+		log.Printf("warning: could not ensure topic %s exists: %v", topic, err)
+	}
 }
 
 func getEnv(key, fallback string) string {
