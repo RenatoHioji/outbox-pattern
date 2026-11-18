@@ -2,35 +2,40 @@ version: 2.1
 
 jobs:
   build-and-test:
+    parameters:
+      service_dir:
+        type: string
     docker:
       - image: cimg/go:1.26
+    working_directory: ~/project/<< parameters.service_dir >>
+    environment:
+      GOWORK: "off"
     steps:
-      - checkout
+      - checkout:
+          path: ~/project
 
       - restore_cache:
-          name: Restore Go module and build cache
+          name: Restore Go module and build cache (<< parameters.service_dir >>)
           keys:
-            - go-cache-v1-{{ checksum "order-api/go.sum" }}-{{ checksum "order-consumer/go.sum" }}
-            - go-cache-v1-
+            - go-cache-v1-<< parameters.service_dir >>-{{ checksum "go.sum" }}
+            - go-cache-v1-<< parameters.service_dir >>-
 
       - run:
-          name: Build services
-          command: |
-            go build -C order-api -v ./...
-            go build -C order-consumer -v ./...
+          name: Build << parameters.service_dir >>
+          command: go build -v ./...
 
       - run:
-          name: Run unit tests
+          name: Run unit tests (<< parameters.service_dir >>)
           command: |
             mkdir -p test-results
-            gotestsum --junitfile test-results/junit.xml -- -race ./order-api/... ./order-consumer/...
+            gotestsum --junitfile test-results/junit.xml -- -race ./...
 
       - store_test_results:
           path: test-results
 
       - save_cache:
-          name: Save Go module and build cache
-          key: go-cache-v1-{{ checksum "order-api/go.sum" }}-{{ checksum "order-consumer/go.sum" }}
+          name: Save Go module and build cache (<< parameters.service_dir >>)
+          key: go-cache-v1-<< parameters.service_dir >>-{{ checksum "go.sum" }}
           paths:
             - /home/circleci/go/pkg/mod
             - /home/circleci/.cache/go-build
@@ -38,4 +43,9 @@ jobs:
 workflows:
   ci:
     jobs:
-      - build-and-test
+      - build-and-test:
+          name: test-order-api
+          service_dir: order-api
+      - build-and-test:
+          name: test-order-consumer
+          service_dir: order-consumer
