@@ -69,6 +69,9 @@ func (c *OrderConsumer) Run(ctx context.Context) error {
 		}
 
 		if err := c.reader.CommitMessages(ctx, msg); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			return fmt.Errorf("commit kafka message: %w", err)
 		}
 	}

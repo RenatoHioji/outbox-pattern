@@ -110,3 +110,12 @@ Defined in [debezium/outbox-connector.json](./debezium/outbox-connector.json):
    k6 run k6/create_orders.js
    ```
 
+4. **Run Unit and Integration Tests:**
+   ```bash
+   # Unit tests (no Docker containers required)
+   go test -v ./order-api/... ./order-consumer/...
+
+   # Integration & CDC End-to-End tests (requires docker compose up -d)
+   go test -v ./test/...
+   ```
+
