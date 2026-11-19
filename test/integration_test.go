@@ -145,6 +145,14 @@ func ensureDebeziumConnector(t *testing.T) {
 		t.Fatalf("failed to read ../debezium/outbox-connector.json: %v", err)
 	}
 
+	if dbHost := os.Getenv("DEBEZIUM_DB_HOST"); dbHost != "" {
+		cfgBytes = bytes.ReplaceAll(
+			cfgBytes,
+			[]byte(`"database.hostname": "postgres"`),
+			[]byte(fmt.Sprintf(`"database.hostname": %q`, dbHost)),
+		)
+	}
+
 	resp, err := http.Post(debeziumURL+"/connectors", "application/json", bytes.NewReader(cfgBytes))
 	if err != nil {
 		t.Fatalf("failed to register Debezium connector: %v", err)
